@@ -3,69 +3,45 @@ package com.zemrow.module.integration.freshdesk;
 import com.zemrow.module.integration.freshdesk.dsl.core.BooleanExpression;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.URISyntaxException;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.Charset;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpHost;
-import org.apache.http.HttpResponse;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.AuthCache;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.config.AuthSchemes;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.methods.HttpUriRequest;
-import org.apache.http.client.methods.RequestBuilder;
-import org.apache.http.client.protocol.HttpClientContext;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.auth.AuthSchemeBase;
-import org.apache.http.impl.auth.BasicScheme;
-import org.apache.http.impl.client.BasicAuthCache;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.impl.client.HttpClientBuilder;
+import java.util.Base64;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
 /**
  * Обертка для работы с freshdesk api
  *
- * TODO оптимизировать создание и использовать http client (содрано с официального примера https://github.com/freshdesk/fresh-samples/blob/master/JAVA/httpclient4x/src/main/java/com/freshdesk/httpclient4x/FilterTickets.java)
- *
  * @author Alexandr Polyakov on 2018.06.17
  */
 public class FreshdeskClient {
 
-    private final String url;
-    private final String username;
-    private final String password;
+    private final String freshdeskUrl;
+    private final String authorization;
 
     /**
      * Создание клиента используя apiKey
      *
-     * @param url путь к freshdesk (обычно имя_компании.freshdesk.com)
+     * @param freshdeskUrl путь к freshdesk (обычно имя_компании.freshdesk.com)
      * @param apiKey ключ для доступа к api
      */
-    public FreshdeskClient(String url, String apiKey) {
-        this(url, apiKey, "X");
+    public FreshdeskClient(String freshdeskUrl, String apiKey) {
+        this(freshdeskUrl, apiKey, "X");
     }
 
     /**
      * Создание клиента
      *
-     * @param url путь к freshdesk (обычно имя_компании.freshdesk.com)
+     * @param freshdeskUrl путь к freshdesk (обычно имя_компании.freshdesk.com)
      * @param username логин
      * @param password пароль
      */
-    public FreshdeskClient(String url, String username, String password) {
-        this.url = url;
-        this.username = username;
-        this.password = password;
+    public FreshdeskClient(String freshdeskUrl, String username, String password) {
+        this.freshdeskUrl = freshdeskUrl;
+        authorization = "Basic " + Base64.getEncoder().encodeToString((username + ':' + password).getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -74,72 +50,85 @@ public class FreshdeskClient {
      * @param predicates условия поиска (например TicketDsl.status.eq(TicketStatus.Open))
      * @return json с набором задач ({"results": [массив задач], "total": количество_задач})
      * @throws IOException
-     * @throws URISyntaxException
      */
-    public JSONObject filterTickets(BooleanExpression... predicates) throws IOException, URISyntaxException {
+    public JSONObject filterTickets(BooleanExpression... predicates) throws IOException {
         BooleanExpression first = null;
         if (predicates != null) {
             for (BooleanExpression predicate : predicates) {
                 if (first == null) {
                     first = predicate;
-                }
-                else {
+                } else {
                     first = first.and(predicate);
                 }
             }
         }
 
-        return filterTickets0((first != null) ? first.toQuery() : "");
+        String fullUrl = freshdeskUrl + "/api/v2/search/tickets";
+        if (first != null) {
+            fullUrl += "?query=\"" + URLEncoder.encode(first.toQuery(), "UTF-8") + '"';
+        }
+        return get(new URL(fullUrl));
     }
 
-    private JSONObject filterTickets0(String filterQuery) throws IOException, URISyntaxException {
-        //TODO
-        final HttpClientBuilder hcBuilder = HttpClientBuilder.create();
-        final RequestBuilder reqBuilder = RequestBuilder.get();
-        final RequestConfig.Builder rcBuilder = RequestConfig.custom();
+    /**
+     * Найти задачу по идентификатору
+     * @param id идентификатор задачи
+     * @return задача
+     * @throws IOException
+     */
+    public JSONObject find(int id) throws IOException {
+        return get(new URL(freshdeskUrl + "/api/v2/tickets/" + id));
+    }
 
-        URL fullUrl = new URL(url + "/api/v2/search/tickets");
-        final String urlHost = fullUrl.getHost();
-        final int urlPort = fullUrl.getPort();
-        final String urlProtocol = fullUrl.getProtocol();
-        reqBuilder.setUri(fullUrl.toURI());
-        reqBuilder.addParameter("query", '"' + filterQuery + '"');
-
-        // Authentication:
-        List<String> authPrefs = new ArrayList<>();
-        authPrefs.add(AuthSchemes.BASIC);
-        rcBuilder.setTargetPreferredAuthSchemes(authPrefs);
-        CredentialsProvider credsProvider = new BasicCredentialsProvider();
-        credsProvider.setCredentials(
-            new AuthScope(urlHost, urlPort, AuthScope.ANY_REALM),
-            new UsernamePasswordCredentials(username, password));
-        hcBuilder.setDefaultCredentialsProvider(credsProvider);
-        AuthCache authCache = new BasicAuthCache();
-        AuthSchemeBase authScheme = new BasicScheme();
-        authCache.put(new HttpHost(urlHost, urlPort, urlProtocol), authScheme);
-        HttpClientContext hccContext = HttpClientContext.create();
-        hccContext.setAuthCache(authCache);
-
-        HttpEntity entity = new StringEntity("", ContentType.APPLICATION_JSON.withCharset(Charset.forName("utf-8")));
-        reqBuilder.setEntity(entity);
-
-        // Execute:
-        RequestConfig rc = rcBuilder.build();
-        reqBuilder.setConfig(rc);
-
-        HttpClient hc = hcBuilder.build();
-        HttpUriRequest req = reqBuilder.build();
-        HttpResponse response = hc.execute(req, hccContext);
-
-        HttpEntity body = response.getEntity();
-        int response_status = response.getStatusLine().getStatusCode();
-
-        if (response_status != 200) {
-            //TODO
-            throw new RuntimeException("request:" + req + "\nresponse:" + response);
+    /**
+     * Обновить задачу
+     * @param id идентификатор задачи
+     * @param update обновляемые поля
+     * @return задача
+     * @throws IOException
+     */
+    public JSONObject update(int id, JSONObject update) throws IOException {
+        URL fullUrl = new URL(freshdeskUrl + "/api/v2/tickets/" + id);
+        final HttpURLConnection connection = (HttpURLConnection)fullUrl.openConnection();
+        connection.setRequestMethod("PUT");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", authorization);
+        connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+        try (final OutputStream os = connection.getOutputStream()) {
+            os.write(update.toString().getBytes(StandardCharsets.UTF_8));
         }
+        return getJsonResponse(connection);
+    }
 
-        JSONObject response_json = new JSONObject(new JSONTokener(new InputStreamReader(body.getContent(), StandardCharsets.UTF_8)));
-        return response_json;
+    /**
+     * Обправить get http запрос
+     * @param url
+     * @return json объект
+     * @throws IOException
+     */
+    private JSONObject get(URL url) throws IOException {
+        final HttpURLConnection connection = (HttpURLConnection)url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", authorization);
+        return getJsonResponse(connection);
+    }
+
+    /**
+     * Прочитать из соединения json объект
+     * @param connection соединение
+     * @return json объект
+     * @throws IOException
+     */
+    private JSONObject getJsonResponse(final HttpURLConnection connection) throws IOException {
+        final int responseCode = connection.getResponseCode();
+        if (responseCode != 200) {
+            //TODO
+            throw new RuntimeException("request:" + connection.getURL().toString() + "\nresponseCode:" + responseCode + "\nresponse" + connection.getResponseMessage());
+        }
+        try(final InputStreamReader reader = new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)) {
+            final JSONObject result = new JSONObject(new JSONTokener(reader));
+            return result;
+        }
     }
 }
