@@ -1,14 +1,22 @@
 package com.zemrow.module.integration.freshdesk;
 
 import com.zemrow.module.integration.freshdesk.dsl.core.BooleanExpression;
+import com.zemrow.module.integration.freshdesk.exception.ObjectNotFoundException;
+import com.zemrow.module.integration.freshdesk.exception.RequestException;
+import com.zemrow.module.integration.freshdesk.exception.TooManyRequestsException;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
@@ -26,7 +34,7 @@ public class FreshdeskClient {
      * Создание клиента используя apiKey
      *
      * @param freshdeskUrl путь к freshdesk (обычно имя_компании.freshdesk.com)
-     * @param apiKey ключ для доступа к api
+     * @param apiKey       ключ для доступа к api
      */
     public FreshdeskClient(String freshdeskUrl, String apiKey) {
         this(freshdeskUrl, apiKey, "X");
@@ -36,8 +44,8 @@ public class FreshdeskClient {
      * Создание клиента
      *
      * @param freshdeskUrl путь к freshdesk (обычно имя_компании.freshdesk.com)
-     * @param username логин
-     * @param password пароль
+     * @param username     логин
+     * @param password     пароль
      */
     public FreshdeskClient(String freshdeskUrl, String username, String password) {
         this.freshdeskUrl = freshdeskUrl;
@@ -48,47 +56,126 @@ public class FreshdeskClient {
      * Найти задачи
      *
      * @param predicates условия поиска (например TicketDsl.status.eq(TicketStatus.Open))
-     * @return json с набором задач ({"results": [массив задач], "total": количество_задач})
+     * @return набор задач
      * @throws IOException
      */
-    public JSONObject filterTickets(BooleanExpression... predicates) throws IOException {
+    public List<JSONObject> filterTickets(BooleanExpression... predicates) throws IOException {
         BooleanExpression first = null;
         if (predicates != null) {
             for (BooleanExpression predicate : predicates) {
                 if (first == null) {
                     first = predicate;
-                } else {
+                }
+                else {
                     first = first.and(predicate);
                 }
             }
         }
 
-        String fullUrl = freshdeskUrl + "/api/v2/search/tickets";
-        if (first != null) {
-            fullUrl += "?query=\"" + URLEncoder.encode(first.toQuery(), "UTF-8") + '"';
+        int page = 1;
+        JSONObject jsonObject = getTicketsInPage(first, page);
+        int total = jsonObject.getInt("total");
+        final List<JSONObject> list = new ArrayList<>(total);
+        JSONArray results = jsonObject.getJSONArray("results");
+        for (int i = 0; i < results.length(); i++) {
+            final JSONObject ticket_json = results.getJSONObject(i);
+            list.add(ticket_json);
+            total--;
         }
-        return get(new URL(fullUrl));
+
+        while (total > 0) {
+            page++;
+            if (page > 10) {
+                System.out.println("TODO");
+                break;
+            }
+            else {
+                jsonObject = getTicketsInPage(first, page);
+                results = jsonObject.getJSONArray("results");
+                for (int i = 0; i < results.length(); i++) {
+                    final JSONObject ticket_json = results.getJSONObject(i);
+                    list.add(ticket_json);
+                    total--;
+                }
+            }
+        }
+        return list;
+    }
+
+    private JSONObject getTicketsInPage(BooleanExpression first, int page) throws IOException {
+        String fullUrl = freshdeskUrl + "/api/v2/search/tickets?page=" + page + "";
+        if (first != null) {
+            fullUrl += "&query=\"" + URLEncoder.encode(first.toQuery(), "UTF-8") + '"';
+        }
+        JSONObject jsonObject = getJsonResponse(new URL(fullUrl));
+        return jsonObject;
     }
 
     /**
      * Найти задачу по идентификатору
-     * @param id идентификатор задачи
+     *
+     * @param ticketId идентификатор задачи
      * @return задача
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#tickets">Freshdesk api</a>
      */
-    public JSONObject find(int id) throws IOException {
-        return get(new URL(freshdeskUrl + "/api/v2/tickets/" + id));
+    public JSONObject getTicket(int ticketId) throws IOException {
+        return getJsonResponse("/api/v2/tickets/" + ticketId);
+    }
+
+    /**
+     * Получить комментарии из задачи
+     *
+     * @param ticketId идентификатор задачи
+     * @return
+     * @throws IOException
+     */
+    public JSONArray getTicketComment(int ticketId) throws IOException {
+        return getJsonArrayResponse("/api/v2/tickets/" + ticketId + "/conversations");
+    }
+
+    /**
+     * Информация о текущем пользователе
+     *
+     * @return json
+     * @throws IOException
+     */
+    public JSONObject me() throws IOException {
+        return getJsonResponse("/api/v2/agents/me");
+    }
+
+    /**
+     * Информация о пользователе
+     *
+     * @param userId
+     * @return json
+     * @throws IOException
+     */
+    public JSONObject getContact(long userId) throws IOException {
+        return getJsonResponse("/api/v2/contacts/" + userId);
+    }
+
+    /**
+     * Информация о пользователе
+     *
+     * @param userId
+     * @return json
+     * @throws IOException
+     */
+    public JSONObject getAgent(Long userId) throws IOException {
+        return getJsonResponse("/api/v2/agents/" + userId);
     }
 
     /**
      * Обновить задачу
-     * @param id идентификатор задачи
-     * @param update обновляемые поля
+     *
+     * @param ticketId идентификатор задачи
+     * @param update   обновляемые поля
      * @return задача
      * @throws IOException
      */
-    public JSONObject update(int id, JSONObject update) throws IOException {
-        URL fullUrl = new URL(freshdeskUrl + "/api/v2/tickets/" + id);
+    public JSONObject updateTicket(int ticketId, JSONObject update) throws IOException {
+        URL fullUrl = new URL(freshdeskUrl + "/api/v2/tickets/" + ticketId);
         final HttpURLConnection connection = (HttpURLConnection)fullUrl.openConnection();
         connection.setRequestMethod("PUT");
         connection.setDoOutput(true);
@@ -101,34 +188,222 @@ public class FreshdeskClient {
     }
 
     /**
-     * Обправить get http запрос
+     * Выполнить http запрос, получить строку
+     *
+     * @param url
+     * @return текст ответа
+     * @throws IOException
+     */
+    private String getString(URL url) throws IOException {
+        final HttpURLConnection connection = getConnection(url);
+        return getString(connection);
+    }
+
+    /**
+     * Отправить http запрос, получить json объект
+     *
+     * @param path
+     * @return json объект
+     * @throws IOException
+     */
+    public JSONObject getJsonResponse(String path) throws IOException {
+        return getJsonResponse(new URL(freshdeskUrl + path));
+    }
+
+    /**
+     * Отправить http запрос, получить json объект
+     *
      * @param url
      * @return json объект
      * @throws IOException
      */
-    private JSONObject get(URL url) throws IOException {
-        final HttpURLConnection connection = (HttpURLConnection)url.openConnection();
-        connection.setRequestMethod("GET");
-        connection.setDoOutput(true);
-        connection.setRequestProperty("Authorization", authorization);
+    private JSONObject getJsonResponse(URL url) throws IOException {
+        final HttpURLConnection connection = getConnection(url);
         return getJsonResponse(connection);
     }
 
     /**
+     * Отправить http запрос, получить json массив
+     *
+     * @param path
+     * @return json массив
+     * @throws IOException
+     */
+    public JSONArray getJsonArrayResponse(String path) throws IOException {
+        return getJsonArrayResponse(new URL(freshdeskUrl + path));
+    }
+
+    /**
+     * Отправить http запрос, получить json массив
+     *
+     * @param url
+     * @return json массив
+     * @throws IOException
+     */
+    private JSONArray getJsonArrayResponse(URL url) throws IOException {
+        final HttpURLConnection connection = getConnection(url);
+        return getJsonArrayResponse(connection);
+    }
+
+    /**
+     * Создать соединение, установить учетные данные
+     *
+     * @param url
+     * @return соединение
+     * @throws IOException
+     */
+    private HttpURLConnection getConnection(URL url) throws IOException {
+        final HttpURLConnection connection = (HttpURLConnection)url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", authorization);
+        return connection;
+    }
+
+    /**
+     * Проверить соединение на ошибку
+     *
+     * @param connection соединение
+     * @throws IOException
+     */
+    private void checkError(final HttpURLConnection connection) throws IOException {
+        final int responseCode = connection.getResponseCode();
+        if (responseCode == HttpURLConnection.HTTP_NOT_FOUND) {
+            throw new ObjectNotFoundException(connection);
+        }
+        if (responseCode == TooManyRequestsException.RESPONSE_CODE) {
+            throw new TooManyRequestsException(connection);
+        }
+        else if (responseCode != 200) {
+            throw new RequestException(connection);
+        }
+        // TODO Доступное количество запросов
+        // @see <a href="https://developers.freshdesk.com/api/#ratelimit">API</a>
+        final String xRatelimitRemainingStr = connection.getHeaderField("x-ratelimit-remaining");
+    }
+
+    /**
+     * Получить поток на чтение из соединения
+     *
+     * @param connection соединение
+     * @return строковый поток
+     * @throws IOException
+     */
+    private InputStreamReader getReaderResponse(final HttpURLConnection connection) throws IOException {
+        checkError(connection);
+        return new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8);
+    }
+
+    /**
      * Прочитать из соединения json объект
+     *
      * @param connection соединение
      * @return json объект
      * @throws IOException
      */
     private JSONObject getJsonResponse(final HttpURLConnection connection) throws IOException {
-        final int responseCode = connection.getResponseCode();
-        if (responseCode != 200) {
-            //TODO
-            throw new RuntimeException("request:" + connection.getURL().toString() + "\nresponseCode:" + responseCode + "\nresponse" + connection.getResponseMessage());
-        }
-        try(final InputStreamReader reader = new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)) {
+        try (final InputStreamReader reader = getReaderResponse(connection)) {
             final JSONObject result = new JSONObject(new JSONTokener(reader));
             return result;
         }
+    }
+
+    /**
+     * Прочитать из соединения json массив
+     *
+     * @param connection соединение
+     * @return json массив
+     * @throws IOException
+     */
+    private JSONArray getJsonArrayResponse(final HttpURLConnection connection) throws IOException {
+        try (final InputStreamReader reader = getReaderResponse(connection)) {
+            final JSONArray result = new JSONArray(new JSONTokener(reader));
+            return result;
+        }
+    }
+
+    /**
+     * Прочитать из соединения строку
+     * @param connection
+     * @return строка
+     * @throws IOException
+     */
+    private String getString(final HttpURLConnection connection) throws IOException {
+        checkError(connection);
+        byte buffer[] = new byte[4048];
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (final InputStream is = connection.getInputStream()) {
+            int l;
+            while ((l = is.read(buffer)) > 0) {
+                out.write(buffer, 0, l);
+            }
+        }
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * История изменения задачи
+     *
+     * @param id идентификатор задачи
+     * @return
+     */
+    //TODO
+//    public List<JSONObject> getActivities(int id) throws IOException {
+//        int page=1;
+//        JSONObject jsonObject = getActivities(id, page);
+//        int total=jsonObject.getInt("total");
+//        final List<JSONObject> list = new ArrayList<>(total);
+//        JSONArray results = jsonObject.getJSONArray("results");
+//        for (int i = 0; i < results.length(); i++) {
+//            final JSONObject ticket_json = results.getJSONObject(i);
+//            list.add(ticket_json);
+//            total--;
+//        }
+//
+//        while (total>0){
+//            page++;
+//            jsonObject = getActivities(id, page);
+//            results = jsonObject.getJSONArray("results");
+//            for (int i = 0; i < results.length(); i++) {
+//                final JSONObject ticket_json = results.getJSONObject(i);
+//                list.add(ticket_json);
+//                total--;
+//            }
+//        }
+//        return list;
+//
+//    }
+    public String getActivities(int id, int page) throws IOException {
+        // String fullUrl = freshdeskUrl + "/api/v2/export/ticket_activities
+        // String fullUrl = freshdeskUrl + "/api/v2/tickets/"+id+"/?page="+page;
+        String fullUrl = freshdeskUrl + "/helpdesk/tickets/" + id + "/activitiesv2?page=" + page;
+//        JSONObject jsonObject = getJsonResponse(new URL(fullUrl));
+        final String body = getString(new URL(fullUrl));
+        return body;
+    }
+
+    /**
+     * Получить вложение
+     * @param id
+     * @return
+     * @throws IOException
+     */
+    public InputStream getAttachments(long id) throws IOException {
+        //TODO
+        // String fullUrl = freshdeskUrl + "/api/v2/attachments/"+id+"?download=true";
+        String fullUrl = freshdeskUrl + "/helpdesk/attachments/" + id + "?download=true";
+        final HttpURLConnection connection = getConnection(new URL(fullUrl));
+        return connection.getInputStream();
+    }
+
+    /**
+     * Информация о компании
+     * @param id
+     * @return json
+     * @throws IOException
+     */
+    public JSONObject getCompany(long id) throws IOException {
+        final JSONObject company = getJsonResponse("/api/v2/companies/" + id);
+        return company;
     }
 }
