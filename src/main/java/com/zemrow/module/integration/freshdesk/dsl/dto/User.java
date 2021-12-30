@@ -1,10 +1,11 @@
-package com.zemrow.module.integration.freshdesk.dsl;
+package com.zemrow.module.integration.freshdesk.dsl.dto;
 
 /**
- * Набор констант и идентификаторами пользователей
+ * Набор констант с идентификаторами пользователей
  *
  * @author Alexandr Polyakov on 2018.06.17
  */
+@Deprecated
 public enum User {
     TEST_USER(1L);
 

@@ -1,7 +1,7 @@
 package com.zemrow.module.integration.freshdesk.dsl;
 
 /**
- * Набор констант для поле status (статус)
+ * Набор констант для поля status (статус)
  *
  * @author Alexandr Polyakov on 2018.06.17
  */

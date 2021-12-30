@@ -2,6 +2,7 @@ package com.zemrow.module.integration.freshdesk.exception;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
@@ -22,10 +23,13 @@ public class RequestException extends RuntimeException {
         this.responseCode = connection.getResponseCode();
         this.responseMessage = connection.getResponseMessage();
         this.body = new StringBuilder();
-        try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = bufferedReader.readLine()) != null) {
-                this.body.append(line);
+        final InputStream stream = connection.getErrorStream();
+        if (stream != null) {
+            try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = bufferedReader.readLine()) != null) {
+                    this.body.append(line);
+                }
             }
         }
     }

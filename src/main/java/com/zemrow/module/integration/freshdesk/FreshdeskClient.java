@@ -1,9 +1,5 @@
 package com.zemrow.module.integration.freshdesk;
 
-import com.zemrow.module.integration.freshdesk.dsl.core.BooleanExpression;
-import com.zemrow.module.integration.freshdesk.exception.ObjectNotFoundException;
-import com.zemrow.module.integration.freshdesk.exception.RequestException;
-import com.zemrow.module.integration.freshdesk.exception.TooManyRequestsException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,6 +12,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import com.zemrow.module.integration.freshdesk.dsl.core.BooleanExpression;
+import com.zemrow.module.integration.freshdesk.exception.ObjectNotFoundException;
+import com.zemrow.module.integration.freshdesk.exception.RequestException;
+import com.zemrow.module.integration.freshdesk.exception.TooManyRequestsException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -24,11 +25,18 @@ import org.json.JSONTokener;
  * Обертка для работы с freshdesk api
  *
  * @author Alexandr Polyakov on 2018.06.17
+ * @see <a href="https://developers.freshdesk.com/api/">https://developers.freshdesk.com/api/</a>
  */
 public class FreshdeskClient {
 
     private final String freshdeskUrl;
     private final String authorization;
+    /**
+     * Доступное количество запросов
+     *
+     * @see <a href="https://developers.freshdesk.com/api/#ratelimit">ratelimit</a>
+     */
+    private final AtomicInteger xRatelimitRemaining;
 
     /**
      * Создание клиента используя apiKey
@@ -50,6 +58,7 @@ public class FreshdeskClient {
     public FreshdeskClient(String freshdeskUrl, String username, String password) {
         this.freshdeskUrl = freshdeskUrl;
         authorization = "Basic " + Base64.getEncoder().encodeToString((username + ':' + password).getBytes(StandardCharsets.UTF_8));
+        xRatelimitRemaining = new AtomicInteger(5000);
     }
 
     /**
@@ -58,6 +67,7 @@ public class FreshdeskClient {
      * @param predicates условия поиска (например TicketDsl.status.eq(TicketStatus.Open))
      * @return набор задач
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#filter_tickets">filter_tickets</a>
      */
     public List<JSONObject> filterTickets(BooleanExpression... predicates) throws IOException {
         BooleanExpression first = null;
@@ -117,7 +127,7 @@ public class FreshdeskClient {
      * @param ticketId идентификатор задачи
      * @return задача
      * @throws IOException
-     * @see <a href="https://developers.freshdesk.com/api/#tickets">Freshdesk api</a>
+     * @see <a href="https://developers.freshdesk.com/api/#view_a_ticket">view_a_ticket</a>
      */
     public JSONObject getTicket(int ticketId) throws IOException {
         return getJsonResponse("/api/v2/tickets/" + ticketId);
@@ -129,6 +139,7 @@ public class FreshdeskClient {
      * @param ticketId идентификатор задачи
      * @return
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#list_all_ticket_notes">list_all_ticket_notes</a>
      */
     public JSONArray getTicketComment(int ticketId) throws IOException {
         return getJsonArrayResponse("/api/v2/tickets/" + ticketId + "/conversations");
@@ -139,6 +150,7 @@ public class FreshdeskClient {
      *
      * @return json
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#me">me</a>
      */
     public JSONObject me() throws IOException {
         return getJsonResponse("/api/v2/agents/me");
@@ -150,6 +162,7 @@ public class FreshdeskClient {
      * @param userId
      * @return json
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#view_contact">view_contact</a>
      */
     public JSONObject getContact(long userId) throws IOException {
         return getJsonResponse("/api/v2/contacts/" + userId);
@@ -161,6 +174,7 @@ public class FreshdeskClient {
      * @param userId
      * @return json
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#view_agent">view_agent</a>
      */
     public JSONObject getAgent(Long userId) throws IOException {
         return getJsonResponse("/api/v2/agents/" + userId);
@@ -173,6 +187,7 @@ public class FreshdeskClient {
      * @param update   обновляемые поля
      * @return задача
      * @throws IOException
+     * @see <a href="https://developers.freshdesk.com/api/#update_ticket">update_ticket</a>
      */
     public JSONObject updateTicket(int ticketId, JSONObject update) throws IOException {
         URL fullUrl = new URL(freshdeskUrl + "/api/v2/tickets/" + ticketId);
@@ -268,7 +283,7 @@ public class FreshdeskClient {
      */
     private void checkError(final HttpURLConnection connection) throws IOException {
         final int responseCode = connection.getResponseCode();
-        if (responseCode == HttpURLConnection.HTTP_NOT_FOUND) {
+        if (responseCode == ObjectNotFoundException.RESPONSE_CODE) {
             throw new ObjectNotFoundException(connection);
         }
         if (responseCode == TooManyRequestsException.RESPONSE_CODE) {
@@ -277,9 +292,16 @@ public class FreshdeskClient {
         else if (responseCode != 200) {
             throw new RequestException(connection);
         }
-        // TODO Доступное количество запросов
-        // @see <a href="https://developers.freshdesk.com/api/#ratelimit">API</a>
         final String xRatelimitRemainingStr = connection.getHeaderField("x-ratelimit-remaining");
+        if (xRatelimitRemainingStr != null) {
+            try {
+                xRatelimitRemaining.set(Integer.parseInt(xRatelimitRemainingStr));
+            }
+            catch (Exception e) {
+                //TODO
+                e.printStackTrace();
+            }
+        }
     }
 
     /**
@@ -373,7 +395,9 @@ public class FreshdeskClient {
 //        return list;
 //
 //    }
+    //TODO
     public String getActivities(int id, int page) throws IOException {
+        // String fullUrl = freshdeskUrl + "/helpdesk/tickets/"+id+"/activitiesv2/?limit=20
         // String fullUrl = freshdeskUrl + "/api/v2/export/ticket_activities
         // String fullUrl = freshdeskUrl + "/api/v2/tickets/"+id+"/?page="+page;
         String fullUrl = freshdeskUrl + "/helpdesk/tickets/" + id + "/activitiesv2?page=" + page;
@@ -405,5 +429,12 @@ public class FreshdeskClient {
     public JSONObject getCompany(long id) throws IOException {
         final JSONObject company = getJsonResponse("/api/v2/companies/" + id);
         return company;
+    }
+
+    /**
+     * @return Доступное количество запросов
+     */
+    public int getXRatelimitRemaining() {
+        return xRatelimitRemaining.get();
     }
 }

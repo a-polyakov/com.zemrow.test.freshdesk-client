@@ -1,6 +1,7 @@
 package com.zemrow.module.integration.freshdesk.dsl;
 
 import com.zemrow.module.integration.freshdesk.dsl.ticket.TicketAgentExpression;
+import com.zemrow.module.integration.freshdesk.dsl.ticket.TicketCFActionExpression;
 import com.zemrow.module.integration.freshdesk.dsl.ticket.TicketCFEnvironmentExpression;
 import com.zemrow.module.integration.freshdesk.dsl.ticket.TicketCompanyExpression;
 import com.zemrow.module.integration.freshdesk.dsl.ticket.TicketGroupExpression;
@@ -42,4 +43,8 @@ public class TicketDsl {
      * Окружение воспроизведения ошибки
      */
     public static final TicketCFEnvironmentExpression cf_environment = new TicketCFEnvironmentExpression();
+    /**
+     * Ожидает починки
+     */
+    public static final TicketCFActionExpression action = new TicketCFActionExpression();
 }

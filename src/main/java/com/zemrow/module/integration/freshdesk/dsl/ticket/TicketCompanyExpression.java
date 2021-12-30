@@ -1,8 +1,8 @@
 package com.zemrow.module.integration.freshdesk.dsl.ticket;
 
-import com.zemrow.module.integration.freshdesk.dsl.Company;
 import com.zemrow.module.integration.freshdesk.dsl.core.BooleanExpression;
 import com.zemrow.module.integration.freshdesk.dsl.core.NumberExpression;
+import com.zemrow.module.integration.freshdesk.dsl.dto.Company;
 
 /**
  * Поле company

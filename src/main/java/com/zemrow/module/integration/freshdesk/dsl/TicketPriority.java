@@ -1,7 +1,7 @@
 package com.zemrow.module.integration.freshdesk.dsl;
 
 /**
- * Набор констант для поле priority (приоритет)
+ * Набор констант для поля priority (приоритет)
  *
  * @author Alexandr Polyakov on 2018.06.17
  */

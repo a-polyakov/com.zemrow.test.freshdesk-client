@@ -9,6 +9,7 @@ import java.net.HttpURLConnection;
  * @author Alexandr Polyakov on 2019.05.27
  */
 public class ObjectNotFoundException extends RequestException {
+    public static final int RESPONSE_CODE = 404;
 
     public ObjectNotFoundException(HttpURLConnection connection) throws IOException {
         super(connection);
