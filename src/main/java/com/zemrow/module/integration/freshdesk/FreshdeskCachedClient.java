@@ -1,9 +1,12 @@
 package com.zemrow.module.integration.freshdesk;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -18,19 +21,23 @@ public class FreshdeskCachedClient extends FreshdeskClient {
     public static final String CONTACTS_CACHE_DIR = "contacts";
     public static final String TICKET_CACHE_DIR = "tickets";
     public static final String TICKET_COMMENTS_CACHE_DIR = "ticket_comments";
+    public static final String TICKET_ATTACHMENTS_CACHE_DIR = "ticket_attachments";
+    public static final String JSON_SUFFIX = ".json";
+    public static final String ATTACH_SUFFIX = ".dat";
     private final File cacheDir;
     private final File cacheDirCompanies;
     private final File cacheDirContacts;
     private final File cacheDirTickets;
     private final File cacheDirTicketComments;
+    private final File cacheDirTicketAttachments;
 
     /**
      * Создание клиента
      *
      * @param freshdeskUrl путь к freshdesk (обычно имя_компании.freshdesk.com)
-     * @param username логин
-     * @param password пароль
-     * @param cacheDir директория для кеширования запросов
+     * @param username     логин
+     * @param password     пароль
+     * @param cacheDir     директория для кеширования запросов
      */
     public FreshdeskCachedClient(String freshdeskUrl, String username, String password, String cacheDir) {
         super(freshdeskUrl, username, password);
@@ -54,6 +61,10 @@ public class FreshdeskCachedClient extends FreshdeskClient {
         if (!cacheDirTicketComments.isDirectory()) {
             cacheDirTicketComments.mkdir();
         }
+        cacheDirTicketAttachments = new File(cacheDir, TICKET_ATTACHMENTS_CACHE_DIR);
+        if (!cacheDirTicketAttachments.isDirectory()) {
+            cacheDirTicketAttachments.mkdir();
+        }
     }
 
     /**
@@ -62,7 +73,7 @@ public class FreshdeskCachedClient extends FreshdeskClient {
     @Override
     public JSONObject getCompany(long id) throws IOException {
         final JSONObject company;
-        final File cache = new File(cacheDirCompanies, id + ".json");
+        final File cache = new File(cacheDirCompanies, id + JSON_SUFFIX);
         if (cache.isFile()) {
             try (final FileReader reader = new FileReader(cache)) {
                 company = new JSONObject(new JSONTokener(reader));
@@ -83,7 +94,7 @@ public class FreshdeskCachedClient extends FreshdeskClient {
     @Override
     public JSONObject getContact(long userId) throws IOException {
         final JSONObject contact;
-        final File cache = new File(cacheDirContacts, userId + ".json");
+        final File cache = new File(cacheDirContacts, userId + JSON_SUFFIX);
         if (cache.isFile()) {
             try (final FileReader reader = new FileReader(cache)) {
                 contact = new JSONObject(new JSONTokener(reader));
@@ -104,7 +115,7 @@ public class FreshdeskCachedClient extends FreshdeskClient {
     @Override
     public JSONObject getTicket(int ticketId) throws IOException {
         final JSONObject ticket;
-        final File cache = new File(cacheDirTickets, ticketId + ".json");
+        final File cache = new File(cacheDirTickets, ticketId + JSON_SUFFIX);
         if (cache.isFile()) {
             try (final FileReader reader = new FileReader(cache)) {
                 ticket = new JSONObject(new JSONTokener(reader));
@@ -125,7 +136,7 @@ public class FreshdeskCachedClient extends FreshdeskClient {
     @Override
     public JSONArray getTicketComment(int ticketId) throws IOException {
         final JSONArray result;
-        final File cache = new File(cacheDirTicketComments, ticketId + ".json");
+        final File cache = new File(cacheDirTicketComments, ticketId + JSON_SUFFIX);
         if (cache.isFile()) {
             try (final FileReader reader = new FileReader(cache)) {
                 result = new JSONArray(new JSONTokener(reader));
@@ -138,5 +149,18 @@ public class FreshdeskCachedClient extends FreshdeskClient {
             }
         }
         return result;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override public InputStream getAttachments(long id) throws IOException {
+        final File cache = new File(cacheDirTicketAttachments, id + ATTACH_SUFFIX);
+        if (!cache.isFile()) {
+            try (final InputStream inputStream = super.getAttachments(id)) {
+                Files.copy(inputStream, cache.toPath());
+            }
+        }
+        return new FileInputStream(cache);
     }
 }

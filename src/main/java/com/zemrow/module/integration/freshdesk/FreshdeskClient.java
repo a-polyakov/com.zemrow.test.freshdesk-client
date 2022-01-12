@@ -14,12 +14,16 @@ import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.zemrow.module.integration.freshdesk.dsl.core.BooleanExpression;
+import com.zemrow.module.integration.freshdesk.dsl.dto.UserDto;
 import com.zemrow.module.integration.freshdesk.exception.ObjectNotFoundException;
 import com.zemrow.module.integration.freshdesk.exception.RequestException;
 import com.zemrow.module.integration.freshdesk.exception.TooManyRequestsException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.TextNode;
 
 /**
  * Обертка для работы с freshdesk api
@@ -180,6 +184,24 @@ public class FreshdeskClient {
         return getJsonResponse("/api/v2/agents/" + userId);
     }
 
+    public UserDto getUser(Long userId) throws Exception {
+        //TODO из браузера можно открыть https://company.freshdesk.com/users/userId но нет универсального метода в API
+//        String s=getString(new URL(freshdeskUrl+"/users/"+userId));
+//        String s=getString(new URL(freshdeskUrl+"/a/admin/agents/"+userId));
+//        String s=getString(new URL(freshdeskUrl+"/api/_/bootstrap/agents_groups"));
+        // TODO
+
+        final Document xml = getXml(new URL(freshdeskUrl + "/agents/" + userId));
+//        final XPathFactory xPathFactory = XPathFactory.newInstance();
+//        final XPathExpression namePath = xPathFactory.newXPath().compile("//div[@class=\"contact-box clearfix\"]//h3[@class=\"title\"]/text()");
+//        final XPathExpression emailPath = xPathFactory.newXPath().compile("//div[./span[text()='Email']]/text()");
+//        final String name = (String)namePath.evaluate(xml, XPathConstants.STRING);
+//        final String email = (String)emailPath.evaluate(xml, XPathConstants.STRING);
+        final String name = xml.selectXpath("//div[@class=\"contact-box clearfix\"]//h3[@class=\"title\"]").text();
+        final String email = xml.selectXpath("//div[./span[text()='Email']]/text()", TextNode.class).get(0).text();
+        return new UserDto(email, name);
+    }
+
     /**
      * Обновить задачу
      *
@@ -235,6 +257,43 @@ public class FreshdeskClient {
     private JSONObject getJsonResponse(URL url) throws IOException {
         final HttpURLConnection connection = getConnection(url);
         return getJsonResponse(connection);
+    }
+
+    /**
+     * Отправить http запрос, получить xml
+     *
+     * @param path
+     * @return xml
+     * @throws Exception
+     */
+    private Document getXml(String path) throws Exception {
+        return getXml(new URL(freshdeskUrl + path));
+    }
+
+    /**
+     * Отправить http запрос, получить xml
+     *
+     * @param url
+     * @return xml
+     * @throws Exception
+     */
+    private Document getXml(URL url) throws Exception {
+        final HttpURLConnection connection = getConnection(url);
+        return getXml(connection);
+    }
+
+    /**
+     * Отправить http запрос, получить xml
+     *
+     * @param connection
+     * @return xml
+     * @throws Exception
+     */
+    private Document getXml(HttpURLConnection connection) throws Exception {
+        checkError(connection);
+        //final Document xml = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(connection.getInputStream());
+        final Document xml = Jsoup.parse(connection.getInputStream(), null, "");
+        return xml;
     }
 
     /**
@@ -346,6 +405,7 @@ public class FreshdeskClient {
 
     /**
      * Прочитать из соединения строку
+     *
      * @param connection
      * @return строка
      * @throws IOException
@@ -408,6 +468,7 @@ public class FreshdeskClient {
 
     /**
      * Получить вложение
+     *
      * @param id
      * @return
      * @throws IOException
@@ -422,6 +483,7 @@ public class FreshdeskClient {
 
     /**
      * Информация о компании
+     *
      * @param id
      * @return json
      * @throws IOException
